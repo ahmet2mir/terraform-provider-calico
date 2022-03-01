@@ -3,6 +3,7 @@ package calico
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -11,6 +12,7 @@ import (
 	calicov3 "github.com/projectcalico/api/pkg/apis/projectcalico/v3"
 	clientset "github.com/projectcalico/api/pkg/client/clientset_generated/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	utilValidation "k8s.io/apimachinery/pkg/util/validation"
 )
 
 var defaultAttributes = map[string]interface{}{
@@ -32,6 +34,19 @@ func resourceIPPool() *schema.Resource {
 	}
 }
 
+func validateAnnotations(value interface{}, key string) (ws []string, es []error) {
+	m := value.(map[string]interface{})
+	for k := range m {
+		errors := utilValidation.IsQualifiedName(strings.ToLower(k))
+		if len(errors) > 0 {
+			for _, e := range errors {
+				es = append(es, fmt.Errorf("%s (%q) %s", key, k, e))
+			}
+		}
+	}
+	return
+}
+
 func resourceCalicoIPPoolSchemaV3() map[string]*schema.Schema {
 	return map[string]*schema.Schema{
 		"metadata": {
@@ -51,6 +66,13 @@ func resourceCalicoIPPoolSchemaV3() map[string]*schema.Schema {
 						Type:        schema.TypeString,
 						Description: "An opaque value that represents the internal version",
 						Computed:    true,
+					},
+					"annotations": {
+						Type:         schema.TypeMap,
+						Description:  "An unstructured key value map",
+						Optional:     true,
+						Elem:         &schema.Schema{Type: schema.TypeString},
+						ValidateFunc: validateAnnotations,
 					},
 				},
 			},
@@ -134,7 +156,7 @@ func getIPPool(ctx context.Context, m *Meta, p *clientset.Clientset, name string
 func setResourceAttributes(d *schema.ResourceData, r *calicov3.IPPool) error {
 	d.SetId(r.Name)
 
-	metadata := []map[string]interface{}{{"name": r.Name, "resource_version": r.ResourceVersion}}
+	metadata := []map[string]interface{}{{"name": r.Name, "resource_version": r.ResourceVersion, "annotations": r.Annotations}}
 	if err := d.Set("metadata", metadata); err != nil {
 		return err
 	}
@@ -154,6 +176,14 @@ func setResourceAttributes(d *schema.ResourceData, r *calicov3.IPPool) error {
 	return nil
 }
 
+func expandStringMap(m map[string]interface{}) map[string]string {
+	result := make(map[string]string)
+	for k, v := range m {
+		result[k] = v.(string)
+	}
+	return result
+}
+
 func setIPPoolAttributes(d *schema.ResourceData, r *calicov3.IPPool) error {
 	spec := calicov3.IPPoolSpec{}
 	spec.BlockSize = d.Get("spec.0.block_size").(int)
@@ -166,6 +196,8 @@ func setIPPoolAttributes(d *schema.ResourceData, r *calicov3.IPPool) error {
 
 	r.Name = d.Get("metadata.0.name").(string)
 	r.ResourceVersion = d.Get("metadata.0.resource_version").(string)
+	r.Annotations = expandStringMap(d.Get("metadata.0.annotations").(map[string]interface{}))
+	// expandStringMap(m["annotations"])
 	r.Spec = spec
 
 	return nil

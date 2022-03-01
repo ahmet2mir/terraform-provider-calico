@@ -13,6 +13,15 @@ Tested with terraform 1.0.5 and Calcio 3.21.4
 ## Usage
 
 ```
+terraform {
+  required_version = "= 1.0.5"
+  required_providers {
+    calico = {
+      source  = "ahmet2mir/calico"
+    }
+  }
+}
+
 provider "calico" {
   # See kubernetes provider https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs
   # to see all possibilities, for the example we use a simple kubeconfig file
@@ -24,6 +33,9 @@ provider "calico" {
 resource "calico_ippool" "test" {
   metadata {
     name = "test"
+    annotations = {
+      "example.com/items" = jsonencode(distinct(concat(["xe1", "xe2"], ["xe4", "xe3"])))
+    }
   }
   spec {
     cidr               = "10.144.1.0/24" # no update
